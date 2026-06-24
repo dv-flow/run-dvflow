@@ -1,0 +1,42 @@
+name: self-test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Provision the same layout ivpm-setup produces: dfm in packages/python.
+      # (Decoupled from ivpm-setup so the test exercises THIS action directly.)
+      - name: Provision dfm venv
+        shell: bash
+        working-directory: test/flow
+        run: |
+          python3 -m venv packages/python
+          packages/python/bin/pip install --upgrade pip
+          packages/python/bin/pip install dv-flow-mgr
+
+      # Exercise this action against the trivial self-test flow
+      - uses: ./
+        with:
+          tasks: greet
+          working-directory: test/flow
+          artifact-name: selftest-report
+
+      # Sanity-check the produced bundle
+      - name: Verify report bundle
+        shell: bash
+        run: |
+          test -f test/flow/dvflow-report/report.json
+          test -f test/flow/dvflow-report/report.md
+          echo "Report bundle present:"
+          ls -R test/flow/dvflow-report

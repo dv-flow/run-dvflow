@@ -1,0 +1,8 @@
+package:
+  name: selftest
+
+  tasks:
+    - name: greet
+      uses: std.Message
+      with:
+        msg: "Hello from run-dvflow self-test"

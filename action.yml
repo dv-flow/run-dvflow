@@ -1,0 +1,137 @@
+name: 'Run DV Flow'
+description: >-
+  Run DV Flow Manager (dfm) tasks in CI and publish a diagnostics report.
+  Activates the ivpm-built venv via direnv, runs `dfm run --report`, then
+  uploads the report bundle as an artifact and writes a job summary.
+author: 'DV Flow'
+branding:
+  icon: 'play'
+  color: 'purple'
+
+inputs:
+  tasks:
+    description: 'Space-separated task name(s) to pass to `dfm run`.'
+    required: true
+  args:
+    description: 'Additional arguments appended to the `dfm run` command line.'
+    required: false
+    default: ''
+  working-directory:
+    description: 'Directory containing the project .envrc / flow files.'
+    required: false
+    default: '.'
+  report:
+    description: 'Directory (relative to working-directory) for the `--report` bundle.'
+    required: false
+    default: 'dvflow-report'
+  ui:
+    description: 'dfm console UI style (log is recommended for CI).'
+    required: false
+    default: 'log'
+  install-direnv:
+    description: 'Install and hook direnv before running (ivpm-setup does not provide it).'
+    required: false
+    default: 'true'
+  job-summary:
+    description: 'Append the generated report.md to $GITHUB_STEP_SUMMARY.'
+    required: false
+    default: 'true'
+  upload-artifact:
+    description: 'Upload the report bundle as a workflow artifact.'
+    required: false
+    default: 'true'
+  artifact-name:
+    description: 'Name of the uploaded report artifact.'
+    required: false
+    default: 'dvflow-report'
+  fail-on-error:
+    description: 'Fail the step if dfm reports one or more failed tasks.'
+    required: false
+    default: 'true'
+
+outputs:
+  report-dir:
+    description: 'Absolute path to the generated report bundle.'
+    value: ${{ steps.run.outputs.report-dir }}
+  status:
+    description: 'dfm exit status (0 == all tasks passed).'
+    value: ${{ steps.run.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install direnv
+      if: ${{ inputs.install-direnv == 'true' }}
+      shell: bash
+      run: |
+        if command -v direnv >/dev/null 2>&1; then
+          echo "direnv already installed: $(direnv version)"
+        else
+          echo "Installing direnv..."
+          sudo apt-get update -qq && sudo apt-get install -y -qq direnv
+        fi
+
+    - name: Run dfm
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -o pipefail
+
+        report_dir="${{ inputs.report }}"
+        mkdir -p "$report_dir"
+
+        # Build the command. dfm reads tasks as positional args.
+        cmd=(dfm run ${{ inputs.tasks }} -u "${{ inputs.ui }}" --report "$report_dir" ${{ inputs.args }})
+        echo "Command: ${cmd[*]}"
+
+        # Prefer direnv so PATH/PYTHONPATH come from the project .envrc exactly
+        # as they would in a developer shell. Fall back to the ivpm venv directly.
+        status=0
+        if [ "${{ inputs.install-direnv }}" = "true" ] && command -v direnv >/dev/null 2>&1; then
+          direnv allow .
+          direnv exec . "${cmd[@]}" || status=$?
+        elif [ -x packages/python/bin/dfm ]; then
+          echo "direnv unavailable; using packages/python venv directly"
+          export PATH="$PWD/packages/python/bin:$PATH"
+          export PYTHONPATH="$PWD/src:$PYTHONPATH"
+          "${cmd[@]}" || status=$?
+        else
+          echo "::error::Could not locate dfm. Run fvutils/ivpm-setup before this action."
+          exit 1
+        fi
+
+        abs_report="$(cd "$report_dir" && pwd)"
+        echo "report-dir=$abs_report" >> "$GITHUB_OUTPUT"
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+        echo "dfm exited with status $status"
+        exit 0
+
+    - name: Write job summary
+      if: ${{ inputs.job-summary == 'true' && always() }}
+      shell: bash
+      run: |
+        summary="${{ steps.run.outputs.report-dir }}/report.md"
+        if [ -f "$summary" ]; then
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "No report.md found at $summary" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload report artifact
+      if: ${{ inputs.upload-artifact == 'true' && always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.run.outputs.report-dir }}
+        if-no-files-found: warn
+
+    - name: Enforce status
+      if: ${{ inputs.fail-on-error == 'true' && always() }}
+      shell: bash
+      run: |
+        status="${{ steps.run.outputs.status }}"
+        if [ "${status:-1}" != "0" ]; then
+          echo "::error::dfm reported failure (status $status)"
+          exit 1
+        fi

@@ -1,0 +1,28 @@
+# Example consumer workflow. Copy into .github/workflows/ in your project.
+name: DV Flow
+
+on:
+  - push
+  - pull_request
+  - workflow_dispatch
+
+jobs:
+  flow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install dfm and project dependencies into ./packages
+      - uses: fvutils/ivpm-setup@v1
+        with:
+          python-version: "3.11"
+          dep-set: default-dev
+
+      # Run dfm tasks, upload the report bundle, and write a job summary
+      - uses: dv-flow/run-dvflow@v1
+        with:
+          tasks: build sim
+          # Optional: pass extra dfm args (e.g. parameter overrides)
+          # args: -D msg="Hello from CI"
+          # report: dvflow-report
+          # artifact-name: dvflow-report
