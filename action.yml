@@ -1,8 +1,5 @@
 name: 'Run DV Flow'
-description: >-
-  Run DV Flow Manager (dfm) tasks in CI and publish a diagnostics report.
-  Activates the ivpm-built venv via direnv, runs `dfm run --report`, then
-  uploads the report bundle as an artifact and writes a job summary.
+description: 'Run DV Flow Manager (dfm) tasks in CI and publish logs and a diagnostics report.'
 author: 'DV Flow'
 branding:
   icon: 'play'
